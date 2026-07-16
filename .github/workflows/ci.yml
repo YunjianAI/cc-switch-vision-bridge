@@ -8,11 +8,12 @@ jobs:
   test:
     runs-on: windows-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -24,7 +25,8 @@ jobs:
         run: |
           $patterns = @('D:\\shan\\hermes', 'C:\\Users\\shany', 'ANTHROPIC_AUTH_TOKEN\s*=', 'sk-[A-Za-z0-9]{16,}')
           foreach ($pattern in $patterns) {
-            $matches = git grep -n -I -E $pattern -- ':!README.md'
-            if ($LASTEXITCODE -eq 0) { Write-Error "Forbidden pattern found: $pattern`n$matches" }
+            $matches = git grep -n -I -E $pattern -- ':!README.md' ':!.github/workflows/ci.yml'
+            if ($LASTEXITCODE -eq 0) { throw "Forbidden pattern found: $pattern`n$matches" }
+            if ($LASTEXITCODE -ne 1) { throw "git grep failed for pattern: $pattern" }
           }
-
+          exit 0
