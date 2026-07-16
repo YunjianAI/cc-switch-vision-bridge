@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cc-switch-vision-bridge"
+version = "0.1.0b1"
+description = "A local vision preprocessing bridge for Claude Desktop and CC Switch."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Yunjian" }]
+dependencies = [
+  "aiohttp==3.13.4",
+  "httpx==0.28.1",
+  "keyring==25.7.0",
+  "Pillow==11.3.0",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp-vision==1.0.1"]
+dev = [
+  "pytest==8.4.1",
+  "pytest-asyncio==1.1.0",
+  "pytest-cov==6.2.1",
+  "ruff==0.12.4",
+]
+
+[project.scripts]
+ccsvb = "cc_switch_vision_bridge.cli:main"
+ccsvb-mcp = "cc_switch_vision_bridge.mcp_launcher:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cc_switch_vision_bridge"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+

@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --disable-pip-version-check -e ".[dev]"
+      - run: python -m ruff check .
+      - run: python -m pytest --cov=cc_switch_vision_bridge --cov-report=term-missing
+      - name: Reject obvious secrets and local paths
+        shell: pwsh
+        run: |
+          $patterns = @('D:\\shan\\hermes', 'C:\\Users\\shany', 'ANTHROPIC_AUTH_TOKEN\s*=', 'sk-[A-Za-z0-9]{16,}')
+          foreach ($pattern in $patterns) {
+            $matches = git grep -n -I -E $pattern -- ':!README.md'
+            if ($LASTEXITCODE -eq 0) { Write-Error "Forbidden pattern found: $pattern`n$matches" }
+          }
+

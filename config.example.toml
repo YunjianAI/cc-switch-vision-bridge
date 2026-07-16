@@ -1,0 +1,24 @@
+[proxy]
+listen_host = "127.0.0.1"
+listen_port = 15722
+upstream_base_url = "http://127.0.0.1:15721"
+max_request_mb = 64
+max_upstream_mb = 32
+
+[vision]
+base_url = "https://token-plan.example.com/v1"
+model = "mimo-v2.5"
+timeout_seconds = 60
+max_concurrency = 3
+max_image_mb = 20
+
+[profile]
+path = ""
+guard_enabled = true
+proxy_base_url = "http://127.0.0.1:15722/claude-desktop"
+poll_seconds = 2
+
+[cache]
+directory = ""
+ttl_hours = 24
+enabled = true
