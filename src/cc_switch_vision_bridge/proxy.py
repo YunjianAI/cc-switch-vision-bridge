@@ -118,7 +118,8 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
 
     if raw_body and request.content_type.lower() == "application/json":
         try:
-            parsed: dict[str, Any] = json.loads(raw_body)
+            decoded = json.loads(raw_body)
+            parsed: dict[str, Any] = decoded if isinstance(decoded, dict) else {}
         except (json.JSONDecodeError, UnicodeDecodeError):
             parsed = {}
         if parsed and has_supported_images(parsed):
@@ -208,6 +209,18 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
                 }
             },
             status=504,
+        )
+    except aiohttp.ClientError as exc:
+        logger.error("request=%s upstream_transport_error type=%s", request_id, type(exc).__name__)
+        return web.json_response(
+            {
+                "error": {
+                    "type": "upstream_transport_error",
+                    "message": "CC Switch upstream connection failed",
+                    "request_id": request_id,
+                }
+            },
+            status=502,
         )
 
 

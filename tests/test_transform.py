@@ -124,6 +124,26 @@ async def test_invalid_base64_follows_context_policy():
 
 
 @pytest.mark.asyncio
+async def test_empty_base64_follows_context_policy():
+    empty = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": ""},
+    }
+    body = {"messages": [{"role": "user", "content": [empty]}]}
+    assert has_supported_images(body)
+    with pytest.raises(DirectImageError, match="empty"):
+        await transform_images(body, FakeVision())
+
+    nested = {
+        "messages": [
+            {"role": "user", "content": [{"type": "tool_result", "content": [empty]}]}
+        ]
+    }
+    result = await transform_images(nested, FakeVision())
+    assert result.tool_failures == 1
+
+
+@pytest.mark.asyncio
 async def test_multiple_images_preserve_order_and_prompt(png_bytes):
     vision = FakeVision()
     body = {
@@ -159,4 +179,3 @@ async def test_large_base64_is_removed_before_forwarding(png_bytes):
     after = len(str(result.body))
     assert before > 2 * 1024 * 1024
     assert after < 1000
-

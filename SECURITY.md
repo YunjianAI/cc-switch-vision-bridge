@@ -6,3 +6,4 @@ Report suspected credential exposure privately to the repository owner. Revoke t
 
 The bridge sends intercepted images to the configured third-party vision provider. Review that provider's data handling policy before use.
 
+MCP configuration backups are kept under `%LOCALAPPDATA%\CCSwitchVisionBridge\backups`, not beside a project configuration file. A backup preserves the original file exactly and can therefore contain credentials that were already stored there; protect it as sensitive local data.

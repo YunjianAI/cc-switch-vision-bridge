@@ -2,7 +2,7 @@
 
 为 Claude Desktop 经由 CC Switch 使用的纯文本模型补充图片理解能力。
 
-当用户直接粘贴图片，或 Playwright、Claude Preview 等工具返回截图时，本地代理会先调用一个 OpenAI 兼容的视觉模型生成描述，再把纯文本请求交给 CC Switch。AI 主动读取本地图片路径或 URL 时，继续使用 `mcp-vision`。
+当用户直接粘贴图片，或 Playwright、Claude Preview 等工具返回截图时，本地代理会先调用 MiMo v2.5 生成描述，再把纯文本请求交给 CC Switch。AI 主动读取本地图片路径或 URL 时，继续使用 `mcp-vision`。
 
 > Experimental / Beta。该项目不是 CC Switch、Anthropic、小米 MiMo 或 mcp-vision 的官方组件。
 
@@ -11,7 +11,7 @@
 ```mermaid
 flowchart LR
     A["Claude Desktop"] --> B["Vision Bridge :15722"]
-    B -->|"图片描述请求"| C["视觉模型，例如 MiMo v2.5"]
+    B -->|"图片描述请求"| C["MiMo v2.5"]
     B -->|"纯文本 Anthropic 请求"| D["CC Switch :15721"]
     D --> E["GLM、DeepSeek 等文本模型"]
     E --> D --> B --> A
@@ -35,10 +35,10 @@ flowchart LR
 - Python 3.11 或更高版本
 - Claude Desktop 第三方 Gateway profile
 - CC Switch 本地代理模式
-- OpenAI `/v1/chat/completions` 兼容视觉 API
+- 小米 MiMo `/v1/chat/completions` 视觉 API
 - PNG、JPEG、WebP、GIF
 
-已经使用 MiMo v2.5 和 GLM 5.2 验证基础链路。其他视觉模型与主模型需要自行测试。
+当前版本固定以 MiMo v2.5 作为视觉模型，文本主模型已使用 GLM 5.2 验证。
 
 ## 安装
 
@@ -49,8 +49,7 @@ git clone https://github.com/YunjianAI/cc-switch-vision-bridge.git
 cd cc-switch-vision-bridge
 Set-ExecutionPolicy -Scope Process Bypass
 .\install.ps1 `
-  -VisionBaseUrl "https://your-vision-provider.example/v1" `
-  -VisionModel "mimo-v2.5"
+  -VisionBaseUrl "https://api.xiaomimimo.com/v1"
 ```
 
 安装器会安全提示输入 API Key。密钥存入 Windows Credential Manager，不写入 TOML、日志或仓库。
@@ -68,13 +67,12 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ```powershell
 .\install.ps1 `
-  -VisionBaseUrl "https://your-vision-provider.example/v1" `
-  -VisionModel "mimo-v2.5" `
+  -VisionBaseUrl "https://api.xiaomimimo.com/v1" `
   -ConfigureMcp `
   -McpConfigPath "D:\your-project\.claude\.mcp.json"
 ```
 
-修改前会在同目录生成 `.ccsvb-backup`。不提供 `-ConfigureMcp` 时不会修改任何 MCP 配置。
+修改前会把完整 MCP 配置备份到 `%LOCALAPPDATA%\CCSwitchVisionBridge\backups`，避免把可能含旧密钥的备份留在项目目录。不提供 `-ConfigureMcp` 时不会修改任何 MCP 配置。
 
 ## 状态与卸载
 

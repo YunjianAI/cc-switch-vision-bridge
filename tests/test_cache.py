@@ -28,11 +28,12 @@ def test_cache_does_not_contain_raw_image_or_secret(tmp_path, png_bytes):
 
 
 def test_expired_cache_is_miss(tmp_path):
-    cache = VisionCache(tmp_path, ttl_hours=1)
     key = "a" * 64
     tmp_path.mkdir(exist_ok=True)
-    (tmp_path / f"{key}.json").write_text(
+    path = tmp_path / f"{key}.json"
+    path.write_text(
         json.dumps({"timestamp": time.time() - 7200, "text": "old"}), encoding="utf-8"
     )
+    cache = VisionCache(tmp_path, ttl_hours=1)
     assert cache.get(key) is None
-
+    assert not path.exists()
