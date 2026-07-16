@@ -27,10 +27,61 @@ async def test_success_and_cache_hit(tmp_path, png_bytes):
             client,
         )
         first = await vision.describe(png_bytes, "what is this")
-        second = await vision.describe(png_bytes, "a different user question")
-    assert first == second == "yellow box"
-    assert calls == 1
+        second = await vision.describe(png_bytes, "what is this")
+        third = await vision.describe(png_bytes, "a different user question")
+    assert first == second == third == "yellow box"
+    assert calls == 2
     assert vision.cache.stats.hits == 1
+
+
+@pytest.mark.asyncio
+async def test_mimo_uses_official_request_shape(tmp_path, png_bytes):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["api-key"] == "test-secret"
+        assert "authorization" not in request.headers
+        body = __import__("json").loads(request.content)
+        assert body["max_completion_tokens"] == 1024
+        assert "max_tokens" not in body
+        assert body["messages"][0]["role"] == "system"
+        assert "specific question" in body["messages"][1]["content"][1]["text"]
+        return httpx.Response(200, json={"choices": [{"message": {"content": "result"}}]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        vision = VisionClient(
+            VisionConfig(base_url="https://api.xiaomimimo.com/v1"),
+            "test-secret",
+            VisionCache(tmp_path),
+            client,
+        )
+        assert await vision.describe(png_bytes, "specific question") == "result"
+
+
+@pytest.mark.asyncio
+async def test_transient_mimo_error_is_retried_once(tmp_path, png_bytes):
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503, json={"error": {"message": "busy"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        vision = VisionClient(
+            VisionConfig(
+                base_url="https://api.xiaomimimo.com/v1",
+                retry_count=1,
+                retry_backoff_seconds=0,
+            ),
+            "test-secret",
+            VisionCache(tmp_path),
+            client,
+        )
+        assert await vision.describe(png_bytes, "question") == "ok"
+    assert calls == 2
 
 
 @pytest.mark.asyncio

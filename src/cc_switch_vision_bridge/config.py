@@ -27,11 +27,14 @@ class ProxyConfig:
 
 @dataclass(slots=True)
 class VisionConfig:
-    base_url: str = ""
+    base_url: str = "https://api.xiaomimimo.com/v1"
     model: str = "mimo-v2.5"
     timeout_seconds: float = 60.0
     max_concurrency: int = 3
     max_image_mb: int = 20
+    max_completion_tokens: int = 1024
+    retry_count: int = 1
+    retry_backoff_seconds: float = 0.5
 
 
 @dataclass(slots=True)
@@ -95,6 +98,12 @@ class AppConfig:
                 raise ValueError(f"{label} must be an http(s) URL")
         if self.vision.max_concurrency < 1:
             raise ValueError("vision.max_concurrency must be positive")
+        if self.vision.max_completion_tokens < 1:
+            raise ValueError("vision.max_completion_tokens must be positive")
+        if self.vision.retry_count < 0:
+            raise ValueError("vision.retry_count cannot be negative")
+        if self.vision.retry_backoff_seconds < 0:
+            raise ValueError("vision.retry_backoff_seconds cannot be negative")
         if self.cache.ttl_hours < 0:
             raise ValueError("cache.ttl_hours cannot be negative")
 

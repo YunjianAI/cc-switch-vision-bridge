@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)] [string] $VisionBaseUrl,
+    [string] $VisionBaseUrl = "https://api.xiaomimimo.com/v1",
     [string] $VisionModel = "mimo-v2.5",
     [string] $UpstreamBaseUrl = "http://127.0.0.1:15721",
     [string] $ProfilePath,
@@ -18,6 +18,7 @@ $Python = Join-Path $VenvDir "Scripts\python.exe"
 $PythonW = Join-Path $VenvDir "Scripts\pythonw.exe"
 $ConfigPath = Join-Path $AppDir "config.toml"
 $StatePath = Join-Path $AppDir "state.json"
+$PidPath = Join-Path $AppDir "bridge.pid"
 $BackupDir = Join-Path $AppDir "backups"
 $RepoRoot = $PSScriptRoot
 
@@ -29,7 +30,11 @@ function Write-Utf8NoBom([string] $Path, [string] $Text) {
 function Write-JsonAtomic([string] $Path, $Value) {
     $temp = "$Path.$PID.tmp"
     Write-Utf8NoBom $temp ($Value | ConvertTo-Json -Depth 20)
-    [IO.File]::Replace($temp, $Path, "$Path.previous", $true)
+    if (Test-Path -LiteralPath $Path) {
+        [IO.File]::Replace($temp, $Path, "$Path.previous", $true)
+    } else {
+        Move-Item -LiteralPath $temp -Destination $Path
+    }
 }
 
 function Select-ClaudeProfile {
@@ -57,7 +62,7 @@ function Select-ClaudeProfile {
     return $candidates[$choice - 1].Path
 }
 
-Write-Host "Installing CC Switch Vision Bridge v0.1.0-beta"
+Write-Host "Installing CC Switch Vision Bridge v0.1.1-beta"
 New-Item -ItemType Directory -Force -Path $AppDir, $BackupDir | Out-Null
 
 if (-not $ProfilePath) { $ProfilePath = Select-ClaudeProfile }
@@ -67,6 +72,7 @@ $originalUrl = [string]$profile.inferenceGatewayBaseUrl
 if (-not $originalUrl.TrimEnd('/').EndsWith('/claude-desktop')) {
     throw "Selected profile does not contain a Claude Desktop gateway URL."
 }
+$previousState = $null
 if ($originalUrl -eq "http://127.0.0.1:15722/claude-desktop" -and (Test-Path $StatePath)) {
     $previousState = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json
     $originalUrl = [string]$previousState.original_profile_url
@@ -77,7 +83,28 @@ if ($originalUrl -eq "http://127.0.0.1:15722/claude-desktop" -and (Test-Path $St
 $portOwner = Get-NetTCPConnection -LocalPort 15722 -State Listen -ErrorAction SilentlyContinue |
     Select-Object -First 1
 if ($portOwner) {
-    throw "Port 15722 is already used by PID $($portOwner.OwningProcess). Stop the existing proxy first."
+    $owned = $false
+    if (Test-Path $PidPath) {
+        $recordedPid = [int](Get-Content -LiteralPath $PidPath -Raw)
+        if ($recordedPid -eq $portOwner.OwningProcess) {
+            $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$recordedPid" `
+                -ErrorAction SilentlyContinue
+            $owned = $proc -and $proc.CommandLine -match 'cc_switch_vision_bridge'
+        }
+    }
+    if (-not $owned) {
+        throw "Port 15722 is already used by PID $($portOwner.OwningProcess)."
+    }
+    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Stop-Process -Id $recordedPid -Force
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Milliseconds 250
+        if (-not (Get-NetTCPConnection -LocalPort 15722 -State Listen `
+                -ErrorAction SilentlyContinue)) { break }
+    }
+    if (Get-NetTCPConnection -LocalPort 15722 -State Listen -ErrorAction SilentlyContinue) {
+        throw "The existing bridge did not release port 15722."
+    }
 }
 
 $backup = Join-Path $BackupDir ("profile_{0}.json" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
@@ -105,6 +132,9 @@ model = "$VisionModel"
 timeout_seconds = 60
 max_concurrency = 3
 max_image_mb = 20
+max_completion_tokens = 1024
+retry_count = 1
+retry_backoff_seconds = 0.5
 
 [profile]
 path = "$escapedProfile"
@@ -130,8 +160,77 @@ if ($env:CCSVB_VISION_API_KEY) {
 $plainKey | & $Python -m cc_switch_vision_bridge.cli --config $ConfigPath set-key --stdin
 $plainKey = $null
 
+$mcpEntry = [ordered]@{
+    command = $Python
+    args = @("-m", "cc_switch_vision_bridge.mcp_launcher")
+    env = [ordered]@{ CCSVB_CONFIG = $ConfigPath }
+}
+$mcp = $null
+$mcpEntryExisted = $false
+$mcpBackupPath = ""
+if ($ConfigureMcp) {
+    if (-not $McpConfigPath) { throw "-McpConfigPath is required with -ConfigureMcp." }
+    $legacyMcpBackupPath = "$McpConfigPath.ccsvb-backup"
+    $existingMcpBackup = ""
+    if ($previousState -and
+        [string]$previousState.mcp_config_path -eq $McpConfigPath -and
+        $previousState.mcp_backup_path -and
+        (Test-Path -LiteralPath $previousState.mcp_backup_path)) {
+        $existingMcpBackup = [string]$previousState.mcp_backup_path
+    } elseif (Test-Path -LiteralPath $legacyMcpBackupPath) {
+        $existingMcpBackup = $legacyMcpBackupPath
+    }
+    if ($existingMcpBackup) {
+        $backupRoot = [IO.Path]::GetFullPath($BackupDir).TrimEnd('\') + '\'
+        $existingFullPath = [IO.Path]::GetFullPath($existingMcpBackup)
+        if ($existingFullPath.StartsWith($backupRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            $mcpBackupPath = $existingFullPath
+        } else {
+            $mcpBackupPath = Join-Path $BackupDir (
+                "mcp_{0}.json" -f (Get-Date -Format "yyyyMMdd_HHmmss")
+            )
+            Move-Item -LiteralPath $existingFullPath -Destination $mcpBackupPath
+        }
+    } else {
+        $mcpBackupPath = Join-Path $BackupDir (
+            "mcp_{0}.json" -f (Get-Date -Format "yyyyMMdd_HHmmss")
+        )
+    }
+    if (Test-Path $McpConfigPath) {
+        $mcp = Get-Content -LiteralPath $McpConfigPath -Raw | ConvertFrom-Json
+        if (-not (Test-Path $mcpBackupPath)) {
+            Copy-Item -LiteralPath $McpConfigPath -Destination $mcpBackupPath
+        }
+    } else {
+        $mcp = [pscustomobject]@{}
+    }
+    $snapshot = $mcp
+    if (Test-Path $mcpBackupPath) {
+        $snapshot = Get-Content -LiteralPath $mcpBackupPath -Raw | ConvertFrom-Json
+    }
+    if ($snapshot.PSObject.Properties['mcpServers'] -and
+        $snapshot.mcpServers.PSObject.Properties[$McpServerName]) {
+        $mcpEntryExisted = $true
+    }
+}
+$stateMcpConfigPath = if ($ConfigureMcp) { $McpConfigPath } elseif ($previousState) {
+    [string]$previousState.mcp_config_path
+} else { "" }
+$stateMcpServerName = if ($ConfigureMcp) { $McpServerName } elseif ($previousState) {
+    [string]$previousState.mcp_server_name
+} else { "" }
+$stateMcpEntryExisted = if ($ConfigureMcp) { $mcpEntryExisted } elseif ($previousState) {
+    [bool]$previousState.mcp_entry_existed
+} else { $false }
+$stateMcpBackupPath = if ($ConfigureMcp) { $mcpBackupPath } elseif ($previousState) {
+    [string]$previousState.mcp_backup_path
+} else { "" }
+$stateMcpInstalledEntry = if ($ConfigureMcp) { $mcpEntry } elseif ($previousState) {
+    $previousState.mcp_installed_entry
+} else { $null }
+
 $state = [ordered]@{
-    version = "0.1.0-beta"
+    version = "0.1.1-beta"
     installed_at = (Get-Date).ToString("o")
     repo_root = $RepoRoot
     profile_path = $ProfilePath
@@ -139,6 +238,11 @@ $state = [ordered]@{
     proxy_profile_url = "http://127.0.0.1:15722/claude-desktop"
     profile_backup = $backup
     task_name = $TaskName
+    mcp_config_path = $stateMcpConfigPath
+    mcp_server_name = $stateMcpServerName
+    mcp_entry_existed = $stateMcpEntryExisted
+    mcp_backup_path = $stateMcpBackupPath
+    mcp_installed_entry = $stateMcpInstalledEntry
 }
 Write-Utf8NoBom $StatePath ($state | ConvertTo-Json -Depth 10)
 
@@ -156,24 +260,12 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Se
     -Description "Local vision preprocessing bridge for Claude Desktop and CC Switch" `
     -Force | Out-Null
 
-$mcpEntry = [ordered]@{
-    command = $Python
-    args = @("-m", "cc_switch_vision_bridge.mcp_launcher")
-    env = [ordered]@{ CCSVB_CONFIG = $ConfigPath }
-}
 $servers = [ordered]@{}
 $servers[$McpServerName] = $mcpEntry
 $snippet = [ordered]@{ mcpServers = $servers }
 Write-Utf8NoBom (Join-Path $AppDir "mcp-config-snippet.json") ($snippet | ConvertTo-Json -Depth 10)
 
 if ($ConfigureMcp) {
-    if (-not $McpConfigPath) { throw "-McpConfigPath is required with -ConfigureMcp." }
-    if (Test-Path $McpConfigPath) {
-        Copy-Item -LiteralPath $McpConfigPath -Destination "$McpConfigPath.ccsvb-backup" -Force
-        $mcp = Get-Content -LiteralPath $McpConfigPath -Raw | ConvertFrom-Json
-    } else {
-        $mcp = [pscustomobject]@{}
-    }
     if (-not $mcp.PSObject.Properties['mcpServers']) {
         $mcp | Add-Member -NotePropertyName mcpServers -NotePropertyValue ([pscustomobject]@{})
     }
@@ -182,7 +274,7 @@ if ($ConfigureMcp) {
     } else {
         $mcp.mcpServers | Add-Member -NotePropertyName $McpServerName -NotePropertyValue $mcpEntry
     }
-    Write-Utf8NoBom $McpConfigPath ($mcp | ConvertTo-Json -Depth 20)
+    Write-JsonAtomic $McpConfigPath $mcp
 }
 
 if (-not $NoStart) { Start-ScheduledTask -TaskName $TaskName }

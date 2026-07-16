@@ -109,6 +109,24 @@ async def test_plain_json_is_forwarded_byte_for_byte(
 
 
 @pytest.mark.asyncio
+async def test_json_array_is_forwarded_without_crashing(
+    tmp_path, provider_server, upstream_server
+):
+    client = await bridge_client(tmp_path, provider_server, upstream_server)
+    raw = b'[{"not":"an anthropic request"}]'
+    try:
+        response = await client.post(
+            "/claude-desktop/v1/messages",
+            data=raw,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status == 200
+        assert await response.read() == raw
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_proxy_replaces_direct_and_tool_images(
     tmp_path, provider_server, upstream_server, png_bytes
 ):
@@ -161,8 +179,7 @@ async def test_health_contains_no_secret(tmp_path, provider_server, upstream_ser
         assert response.status == 200
         assert "test-key" not in text
         data = json.loads(text)
-        assert data["version"] == "0.1.0-beta"
+        assert data["version"] == "0.1.1-beta"
         assert data["vision"]["model"] == "test-vision"
     finally:
         await client.close()
-

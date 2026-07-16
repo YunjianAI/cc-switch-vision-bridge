@@ -63,8 +63,14 @@ async def transform_images(
         return TransformResult(transformed, 0, 0, 0, 0)
 
     async def process(node: dict[str, Any], inside_tool: bool) -> dict[str, str]:
+        encoded = node["source"].get("data")
+        if not isinstance(encoded, str) or not encoded:
+            error = VisionError("Image base64 is empty", status=422)
+            if inside_tool:
+                return _failure_block(error)
+            raise DirectImageError(str(error), status=error.status)
         try:
-            raw = base64.b64decode(node["source"]["data"], validate=True)
+            raw = base64.b64decode(encoded, validate=True)
         except (ValueError, TypeError) as exc:
             error = VisionError("Image base64 is invalid", status=422)
             if inside_tool:
@@ -108,7 +114,6 @@ def _is_base64_image(node: Any) -> bool:
         and node.get("type") == "image"
         and isinstance(node.get("source"), dict)
         and node["source"].get("type") == "base64"
-        and bool(node["source"].get("data"))
     )
 
 

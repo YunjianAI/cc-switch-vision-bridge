@@ -21,6 +21,8 @@ class VisionCache:
         self.ttl_seconds = ttl_hours * 3600
         self.enabled = enabled and ttl_hours > 0
         self.stats = CacheStats()
+        if self.enabled:
+            self.prune()
 
     @staticmethod
     def key(image: bytes, model: str, prompt_version: str, prompt: str) -> str:
@@ -43,6 +45,10 @@ class VisionCache:
             data = json.loads(path.read_text(encoding="utf-8"))
             age = time.time() - float(data["timestamp"])
             if age < 0 or age > self.ttl_seconds:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
                 self.stats.misses += 1
                 return None
             text = data.get("text")
@@ -71,3 +77,18 @@ class VisionCache:
         os.replace(temp, path)
         self.stats.writes += 1
 
+    def prune(self) -> int:
+        if not self.directory.exists():
+            return 0
+        removed = 0
+        now = time.time()
+        for path in self.directory.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                age = now - float(data["timestamp"])
+                if age < 0 or age > self.ttl_seconds:
+                    path.unlink()
+                    removed += 1
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        return removed
