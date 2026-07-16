@@ -62,7 +62,7 @@ function Select-ClaudeProfile {
     return $candidates[$choice - 1].Path
 }
 
-Write-Host "Installing CC Switch Vision Bridge v0.1.1-beta"
+Write-Host "Installing CC Switch Vision Bridge v0.1.2-dev"
 New-Item -ItemType Directory -Force -Path $AppDir, $BackupDir | Out-Null
 
 if (-not $ProfilePath) { $ProfilePath = Select-ClaudeProfile }
@@ -230,7 +230,7 @@ $stateMcpInstalledEntry = if ($ConfigureMcp) { $mcpEntry } elseif ($previousStat
 } else { $null }
 
 $state = [ordered]@{
-    version = "0.1.1-beta"
+    version = "0.1.2-dev"
     installed_at = (Get-Date).ToString("o")
     repo_root = $RepoRoot
     profile_path = $ProfilePath

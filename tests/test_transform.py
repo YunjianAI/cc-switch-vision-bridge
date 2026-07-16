@@ -171,6 +171,78 @@ async def test_multiple_images_preserve_order_and_prompt(png_bytes):
 
 
 @pytest.mark.asyncio
+async def test_text_followup_reanalyzes_most_recent_image_with_new_question(png_bytes):
+    vision = FakeVision()
+    body = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    image_block(png_bytes),
+                    {"type": "text", "text": "describe the whole image"},
+                ],
+            },
+            {"role": "assistant", "content": "initial answer"},
+            {"role": "user", "content": "how many steps are visible?"},
+        ]
+    }
+    await transform_images(body, vision)
+    assert vision.prompts == ["how many steps are visible?"]
+
+
+@pytest.mark.asyncio
+async def test_new_image_question_does_not_reprompt_historical_image(png_bytes):
+    vision = FakeVision()
+    body = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    image_block(png_bytes),
+                    {"type": "text", "text": "question for the old image"},
+                ],
+            },
+            {"role": "assistant", "content": "old answer"},
+            {
+                "role": "user",
+                "content": [
+                    image_block(png_bytes + b"new"),
+                    {"type": "text", "text": "question for the new image"},
+                ],
+            },
+        ]
+    }
+    await transform_images(body, vision)
+    assert vision.prompts == [
+        "question for the old image",
+        "question for the new image",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tool_screenshot_uses_preceding_user_request(png_bytes):
+    vision = FakeVision()
+    body = {
+        "messages": [
+            {"role": "user", "content": "inspect the page screenshot"},
+            {"role": "assistant", "content": "using a browser tool"},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "browser_1",
+                        "content": [image_block(png_bytes)],
+                    }
+                ],
+            },
+        ]
+    }
+    await transform_images(body, vision)
+    assert vision.prompts == ["inspect the page screenshot"]
+
+
+@pytest.mark.asyncio
 async def test_large_base64_is_removed_before_forwarding(png_bytes):
     padded = png_bytes + b"0" * (2 * 1024 * 1024)
     body = {"messages": [{"role": "user", "content": [image_block(padded)]}]}

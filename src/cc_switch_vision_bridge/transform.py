@@ -37,15 +37,9 @@ def extract_user_text(body: dict[str, Any]) -> str:
     for message in reversed(messages):
         if not isinstance(message, dict) or message.get("role") != "user":
             continue
-        content = message.get("content", [])
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            return " ".join(
-                block.get("text", "")
-                for block in content
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
+        text = _direct_message_text(message)
+        if text:
+            return text
     return ""
 
 
@@ -53,16 +47,62 @@ async def transform_images(
     body: dict[str, Any], describer: ImageDescriber
 ) -> TransformResult:
     transformed = copy.deepcopy(body)
-    user_text = extract_user_text(transformed)
-    targets = [
-        (parent, key, node, inside_tool)
-        for node, inside_tool, parent, key in _walk_mutable(transformed.get("messages", []))
-        if _is_base64_image(node)
+    messages = transformed.get("messages", [])
+    if not isinstance(messages, list):
+        messages = []
+
+    image_message_indices = [
+        index
+        for index, message in enumerate(messages)
+        if any(_is_base64_image(node) for node, _ in _walk(message))
     ]
+    latest_user_index = next(
+        (
+            index
+            for index in range(len(messages) - 1, -1, -1)
+            if isinstance(messages[index], dict)
+            and messages[index].get("role") == "user"
+        ),
+        None,
+    )
+    focus_image_index: int | None = None
+    current_prompt = ""
+    if latest_user_index is not None:
+        current_prompt = _direct_message_text(messages[latest_user_index])
+        if not current_prompt:
+            current_prompt = _stable_message_prompt(messages, latest_user_index)
+        if latest_user_index in image_message_indices:
+            focus_image_index = latest_user_index
+        else:
+            focus_image_index = next(
+                (
+                    index
+                    for index in reversed(image_message_indices)
+                    if index < latest_user_index
+                ),
+                None,
+            )
+    elif image_message_indices:
+        focus_image_index = image_message_indices[-1]
+
+    targets = []
+    for message_index, message in enumerate(messages):
+        prompt = (
+            current_prompt
+            if message_index == focus_image_index and current_prompt
+            else _stable_message_prompt(messages, message_index)
+        )
+        targets.extend(
+            (parent, key, node, inside_tool, prompt)
+            for node, inside_tool, parent, key in _walk_mutable(message)
+            if _is_base64_image(node)
+        )
     if not targets:
         return TransformResult(transformed, 0, 0, 0, 0)
 
-    async def process(node: dict[str, Any], inside_tool: bool) -> dict[str, str]:
+    async def process(
+        node: dict[str, Any], inside_tool: bool, prompt: str
+    ) -> dict[str, str]:
         encoded = node["source"].get("data")
         if not isinstance(encoded, str) or not encoded:
             error = VisionError("Image base64 is empty", status=422)
@@ -77,7 +117,7 @@ async def transform_images(
                 return _failure_block(error)
             raise DirectImageError(str(error), status=error.status) from exc
         try:
-            description = await describer.describe(raw, user_text)
+            description = await describer.describe(raw, prompt)
         except VisionError as exc:
             if inside_tool:
                 return _failure_block(exc)
@@ -88,10 +128,12 @@ async def transform_images(
         }
 
     replacements = await asyncio.gather(
-        *(process(node, inside_tool) for _, _, node, inside_tool in targets)
+        *(process(node, inside_tool, prompt) for _, _, node, inside_tool, prompt in targets)
     )
     tool_failures = 0
-    for (parent, key, _, inside_tool), replacement in zip(targets, replacements, strict=True):
+    for (parent, key, _, inside_tool, _), replacement in zip(
+        targets, replacements, strict=True
+    ):
         parent[key] = replacement
         if inside_tool and replacement["text"].startswith("[Image Analysis Failed]"):
             tool_failures += 1
@@ -106,6 +148,38 @@ def _failure_block(error: VisionError) -> dict[str, str]:
         "type": "text",
         "text": f"[Image Analysis Failed]\n{error}\n[End Image Analysis Failure]",
     }
+
+
+def _direct_message_text(message: Any) -> str:
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content", [])
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    return " ".join(
+        block.get("text", "").strip()
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+        and block.get("text", "").strip()
+    )
+
+
+def _stable_message_prompt(messages: list[Any], message_index: int) -> str:
+    own_text = _direct_message_text(messages[message_index])
+    if own_text:
+        return own_text
+    for index in range(message_index - 1, -1, -1):
+        message = messages[index]
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        text = _direct_message_text(message)
+        if text:
+            return text
+    return ""
 
 
 def _is_base64_image(node: Any) -> bool:

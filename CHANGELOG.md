@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2-dev
+
+- Bind each image to the question from its own conversation turn.
+- Reanalyze the most recent image group only when a text-only follow-up asks a new question.
+- Reuse historical image descriptions when a new turn contains a different image, avoiding repeated MiMo calls as image history grows.
+
 ## 0.1.1-beta
 
 - Use MiMo's official `api-key` authentication and `max_completion_tokens` request field.
