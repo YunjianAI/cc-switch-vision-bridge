@@ -8,6 +8,14 @@ from typing import Any, Protocol
 
 from .vision import VisionError
 
+BRIDGE_SYSTEM_INSTRUCTION = """CC Switch Vision Bridge preprocessing is active.
+Any [Vision Bridge Image Analysis] block in message content is the completed result of the
+configured external vision service. The original image has already been analyzed and removed
+before this request reached the text model. Use that analysis as visual evidence and answer the
+user directly. Do not call another vision or OCR tool, search temporary folders, or request an
+image path for such a block. Only report that vision is unavailable when an
+[Image Analysis Failed] block is present."""
+
 
 class ImageDescriber(Protocol):
     async def describe(self, image_bytes: bytes, user_text: str = "") -> str: ...
@@ -124,7 +132,10 @@ async def transform_images(
             raise DirectImageError(str(exc), status=exc.status) from exc
         return {
             "type": "text",
-            "text": f"[Image Description]\n{description}\n[End Image Description]",
+            "text": (
+                f"[Vision Bridge Image Analysis]\n{description}\n"
+                "[End Vision Bridge Image Analysis]"
+            ),
         }
 
     replacements = await asyncio.gather(
@@ -138,6 +149,8 @@ async def transform_images(
         if inside_tool and replacement["text"].startswith("[Image Analysis Failed]"):
             tool_failures += 1
 
+    _append_bridge_system_instruction(transformed)
+
     direct = sum(not target[3] for target in targets)
     tools = len(targets) - direct
     return TransformResult(transformed, len(targets), direct, tools, tool_failures)
@@ -148,6 +161,16 @@ def _failure_block(error: VisionError) -> dict[str, str]:
         "type": "text",
         "text": f"[Image Analysis Failed]\n{error}\n[End Image Analysis Failure]",
     }
+
+
+def _append_bridge_system_instruction(body: dict[str, Any]) -> None:
+    system = body.get("system")
+    if system is None:
+        body["system"] = BRIDGE_SYSTEM_INSTRUCTION
+    elif isinstance(system, str):
+        body["system"] = f"{system}\n\n{BRIDGE_SYSTEM_INSTRUCTION}"
+    elif isinstance(system, list):
+        system.append({"type": "text", "text": BRIDGE_SYSTEM_INSTRUCTION})
 
 
 def _direct_message_text(message: Any) -> str:

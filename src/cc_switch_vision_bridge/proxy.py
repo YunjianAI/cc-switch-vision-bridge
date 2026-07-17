@@ -151,10 +151,14 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
             try:
                 result = await transform_images(parsed, request.app[VISION_KEY])
             except DirectImageError as exc:
-                logger.warning("request=%s direct_image_failed status=%d", request_id, exc.status)
+                logger.warning(
+                    "request=%s direct_image_failed provider_status=%d response_status=422",
+                    request_id,
+                    exc.status,
+                )
                 return _anthropic_error_response(
-                    status=exc.status,
-                    error_type=_error_type_for_status(exc.status),
+                    status=422,
+                    error_type="invalid_request_error",
                     message=f"Vision preprocessing failed: {exc}",
                     request_id=request_id,
                 )

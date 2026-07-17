@@ -7,6 +7,8 @@
 - Reuse historical image descriptions when a new turn contains a different image, avoiding repeated MiMo calls as image history grows.
 - Treat `timeout_seconds` as one total budget shared by all vision retry attempts, preventing a nominal 60-second timeout from blocking for roughly 120 seconds.
 - Return locally generated failures in the Anthropic API error shape so Claude clients can surface preprocessing errors and request IDs.
+- Add a system-level handoff instruction for completed Vision Bridge analyses so text models do not redundantly invoke MCP vision or search temporary folders.
+- Return exhausted direct-image preprocessing failures as non-retryable 422 errors after the Bridge's own retry, preventing Claude Code from repeating the same failed vision request ten times.
 
 ## 0.1.1-beta
 

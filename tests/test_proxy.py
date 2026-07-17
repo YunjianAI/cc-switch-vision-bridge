@@ -218,9 +218,9 @@ async def test_direct_image_failure_uses_anthropic_error_shape(
             json={"messages": [{"role": "user", "content": [image_block(png_bytes)]}]},
         )
         data = await response.json()
-        assert response.status == 502
+        assert response.status == 422
         assert data["type"] == "error"
-        assert data["error"]["type"] == "api_error"
+        assert data["error"]["type"] == "invalid_request_error"
         assert "provider secret" not in data["error"]["message"]
         assert data["request_id"] == response.headers["request-id"]
         assert data["request_id"] == response.headers["x-ccsvb-request-id"]
