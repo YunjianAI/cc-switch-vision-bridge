@@ -44,6 +44,7 @@ async def test_mimo_uses_official_request_shape(tmp_path, png_bytes):
         assert "authorization" not in request.headers
         body = __import__("json").loads(request.content)
         assert body["max_completion_tokens"] == 1024
+        assert body["thinking"] == {"type": "disabled"}
         assert "max_tokens" not in body
         assert body["messages"][0]["role"] == "system"
         assert "specific question" in body["messages"][1]["content"][1]["text"]
@@ -58,6 +59,54 @@ async def test_mimo_uses_official_request_shape(tmp_path, png_bytes):
             client,
         )
         assert await vision.describe(png_bytes, "specific question") == "result"
+
+
+@pytest.mark.asyncio
+async def test_generic_provider_does_not_receive_mimo_thinking_field(tmp_path, png_bytes):
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content)
+        assert "thinking" not in body
+        return httpx.Response(200, json={"choices": [{"message": {"content": "result"}}]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        vision = VisionClient(
+            VisionConfig(base_url="https://vision.example/v1"),
+            "test-secret",
+            VisionCache(tmp_path),
+            client,
+        )
+        assert await vision.describe(png_bytes, "specific question") == "result"
+
+
+@pytest.mark.asyncio
+async def test_mimo_thinking_mode_is_part_of_cache_profile(tmp_path, png_bytes):
+    calls = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"choices": [{"message": {"content": "result"}}]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        cache = VisionCache(tmp_path)
+        disabled = VisionClient(
+            VisionConfig(base_url="https://api.xiaomimimo.com/v1", thinking="disabled"),
+            "test-secret",
+            cache,
+            client,
+        )
+        enabled = VisionClient(
+            VisionConfig(base_url="https://api.xiaomimimo.com/v1", thinking="enabled"),
+            "test-secret",
+            cache,
+            client,
+        )
+        await disabled.describe(png_bytes, "question")
+        await enabled.describe(png_bytes, "question")
+
+    assert calls == 2
 
 
 @pytest.mark.asyncio
@@ -88,14 +137,13 @@ async def test_transient_mimo_error_is_retried_once(tmp_path, png_bytes):
 
 
 @pytest.mark.asyncio
-async def test_retries_share_one_total_timeout_budget(tmp_path, png_bytes):
+async def test_slow_request_gets_the_full_total_timeout_budget(tmp_path, png_bytes):
     calls = 0
 
     async def handler(_: httpx.Request) -> httpx.Response:
         nonlocal calls
         calls += 1
-        if calls == 1:
-            await asyncio.sleep(0.2)
+        await asyncio.sleep(0.09)
         return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
 
     transport = httpx.MockTransport(handler)
@@ -115,7 +163,8 @@ async def test_retries_share_one_total_timeout_budget(tmp_path, png_bytes):
         assert await vision.describe(png_bytes, "question") == "ok"
         elapsed = time.monotonic() - started
 
-    assert calls == 2
+    assert calls == 1
+    assert elapsed >= 0.08
     assert elapsed < 0.18
 
 

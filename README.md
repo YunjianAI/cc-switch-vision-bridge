@@ -104,7 +104,8 @@ http://127.0.0.1:15722/health
 
 - `max_request_mb = 64`：代理允许读取的请求体上限。
 - `max_upstream_mb = 32`：图像替换后允许发送到 CC Switch 的上限。
-- `timeout_seconds = 60`：单张图片识别及其全部重试共享的总时间预算，不会按重试次数倍增。
+- `timeout_seconds = 60`：单张图片识别及其全部重试共享的总时间预算。单次慢请求可使用完整剩余预算，不会为预留重试次数而被提前取消。
+- `thinking = "disabled"`：MiMo v2.5 默认会开启深度思考；桥接器的截图描述任务默认关闭它，以降低首字延迟。该字段只会发送给 MiMo 官方域名，其他 OpenAI 兼容接口不会收到 MiMo 专用参数。
 - `max_concurrency = 3`：并行视觉请求数量。
 - `ttl_hours = 24`：缓存时间，设为 `0` 可关闭缓存。
 - `guard_enabled = true`：CC Switch 重写 profile 后自动恢复 15722。

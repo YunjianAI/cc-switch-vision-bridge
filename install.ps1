@@ -133,6 +133,7 @@ timeout_seconds = 60
 max_concurrency = 3
 max_image_mb = 20
 max_completion_tokens = 1024
+thinking = "disabled"
 retry_count = 1
 retry_backoff_seconds = 0.5
 

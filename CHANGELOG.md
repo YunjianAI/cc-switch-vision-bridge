@@ -2,6 +2,9 @@
 
 ## 0.1.2-dev
 
+- Disable MiMo v2.5 deep thinking for image preprocessing by default to reduce avoidable latency, while keeping the setting configurable and isolated from generic OpenAI-compatible providers.
+- Include the MiMo thinking mode in the cache profile so switching modes cannot reuse an incompatible cached description.
+- Let a slow vision request use the full remaining timeout budget; retry only failures that return early, instead of cancelling a potentially successful request halfway through.
 - Bind each image to the question from its own conversation turn.
 - Reanalyze the most recent image group only when a text-only follow-up asks a new question.
 - Reuse historical image descriptions when a new turn contains a different image, avoiding repeated MiMo calls as image history grows.

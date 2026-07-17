@@ -33,6 +33,7 @@ class VisionConfig:
     max_concurrency: int = 3
     max_image_mb: int = 20
     max_completion_tokens: int = 1024
+    thinking: str = "disabled"
     retry_count: int = 1
     retry_backoff_seconds: float = 0.5
 
@@ -100,6 +101,8 @@ class AppConfig:
             raise ValueError("vision.max_concurrency must be positive")
         if self.vision.max_completion_tokens < 1:
             raise ValueError("vision.max_completion_tokens must be positive")
+        if self.vision.thinking not in {"enabled", "disabled"}:
+            raise ValueError("vision.thinking must be 'enabled' or 'disabled'")
         if self.vision.retry_count < 0:
             raise ValueError("vision.retry_count cannot be negative")
         if self.vision.retry_backoff_seconds < 0:

@@ -108,7 +108,8 @@ class VisionClient:
     async def describe(self, image_bytes: bytes, user_text: str = "") -> str:
         media_type = validate_image(image_bytes, self.config.max_image_mb)
         prompt = effective_prompt(user_text)
-        key = self.cache.key(image_bytes, self.config.model, PROMPT_VERSION, prompt)
+        request_profile = self._request_profile()
+        key = self.cache.key(image_bytes, self.config.model, request_profile, prompt)
         cached = self.cache.get(key)
         if cached is not None:
             return cached
@@ -139,7 +140,7 @@ class VisionClient:
             {
                 "image_sha256": hashlib.sha256(image_bytes).hexdigest(),
                 "model": self.config.model,
-                "prompt_version": PROMPT_VERSION,
+                "prompt_version": request_profile,
                 "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
             },
         )
@@ -152,13 +153,19 @@ class VisionClient:
         )
         return text
 
+    def _is_mimo(self) -> bool:
+        return (urlparse(self.config.base_url).hostname or "").endswith("xiaomimimo.com")
+
+    def _request_profile(self) -> str:
+        if self._is_mimo():
+            return f"{PROMPT_VERSION};thinking={self.config.thinking}"
+        return PROMPT_VERSION
+
     async def _request(self, image_bytes: bytes, media_type: str, prompt: str) -> str:
         if self._client is None:
             raise RuntimeError("VisionClient must be used as an async context manager")
         data_url = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
-        is_mimo = (urlparse(self.config.base_url).hostname or "").endswith(
-            "xiaomimimo.com"
-        )
+        is_mimo = self._is_mimo()
         messages: list[dict[str, Any]] = []
         if is_mimo:
             messages.append(
@@ -182,6 +189,8 @@ class VisionClient:
         }
         token_field = "max_completion_tokens" if is_mimo else "max_tokens"
         body[token_field] = self.config.max_completion_tokens
+        if is_mimo:
+            body["thinking"] = {"type": self.config.thinking}
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         headers = (
             {"api-key": self.api_key}
@@ -194,14 +203,13 @@ class VisionClient:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 raise VisionError("Vision provider timed out")
-            remaining_attempts = self.config.retry_count + 1 - attempt
-            attempt_timeout = remaining / remaining_attempts
             try:
-                async with asyncio.timeout(attempt_timeout):
+                async with asyncio.timeout(remaining):
                     response = await self._client.post(url, headers=headers, json=body)
             except (TimeoutError, httpx.TimeoutException) as exc:
-                if attempt >= self.config.retry_count:
-                    raise VisionError("Vision provider timed out") from exc
+                # A slow provider needs the full request budget. Retrying after the
+                # deadline would only duplicate expensive vision work.
+                raise VisionError("Vision provider timed out") from exc
             except httpx.RequestError as exc:
                 if attempt >= self.config.retry_count:
                     raise VisionError(
