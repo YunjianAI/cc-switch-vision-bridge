@@ -189,10 +189,17 @@ class VisionClient:
             else {"Authorization": f"Bearer {self.api_key}"}
         )
         response: httpx.Response | None = None
+        deadline = asyncio.get_running_loop().time() + self.config.timeout_seconds
         for attempt in range(self.config.retry_count + 1):
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise VisionError("Vision provider timed out")
+            remaining_attempts = self.config.retry_count + 1 - attempt
+            attempt_timeout = remaining / remaining_attempts
             try:
-                response = await self._client.post(url, headers=headers, json=body)
-            except httpx.TimeoutException as exc:
+                async with asyncio.timeout(attempt_timeout):
+                    response = await self._client.post(url, headers=headers, json=body)
+            except (TimeoutError, httpx.TimeoutException) as exc:
                 if attempt >= self.config.retry_count:
                     raise VisionError("Vision provider timed out") from exc
             except httpx.RequestError as exc:
@@ -206,7 +213,11 @@ class VisionClient:
                 if attempt >= self.config.retry_count:
                     break
             if self.config.retry_backoff_seconds:
-                await asyncio.sleep(self.config.retry_backoff_seconds * (attempt + 1))
+                backoff = self.config.retry_backoff_seconds * (attempt + 1)
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise VisionError("Vision provider timed out")
+                await asyncio.sleep(min(backoff, remaining))
         if response is None:
             raise VisionError("Vision provider request failed")
         if response.status_code != 200:

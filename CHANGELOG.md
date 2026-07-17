@@ -5,6 +5,8 @@
 - Bind each image to the question from its own conversation turn.
 - Reanalyze the most recent image group only when a text-only follow-up asks a new question.
 - Reuse historical image descriptions when a new turn contains a different image, avoiding repeated MiMo calls as image history grows.
+- Treat `timeout_seconds` as one total budget shared by all vision retry attempts, preventing a nominal 60-second timeout from blocking for roughly 120 seconds.
+- Return locally generated failures in the Anthropic API error shape so Claude clients can surface preprocessing errors and request IDs.
 
 ## 0.1.1-beta
 

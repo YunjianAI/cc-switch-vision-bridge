@@ -104,6 +104,7 @@ http://127.0.0.1:15722/health
 
 - `max_request_mb = 64`：代理允许读取的请求体上限。
 - `max_upstream_mb = 32`：图像替换后允许发送到 CC Switch 的上限。
+- `timeout_seconds = 60`：单张图片识别及其全部重试共享的总时间预算，不会按重试次数倍增。
 - `max_concurrency = 3`：并行视觉请求数量。
 - `ttl_hours = 24`：缓存时间，设为 `0` 可关闭缓存。
 - `guard_enabled = true`：CC Switch 重写 profile 后自动恢复 15722。
@@ -118,11 +119,11 @@ http://127.0.0.1:15722/health
 
 ## 排错
 
-- `vision_preprocessing_error: Vision provider timed out`：代理已收到图片，但视觉供应商没有在配置时间内响应。先直接测试视觉 API，再考虑增大 `timeout_seconds`。
+- `Vision preprocessing failed: Vision provider timed out`：代理已收到图片，但视觉供应商没有在总时间预算内响应。先直接测试视觉 API，再考虑增大 `timeout_seconds`。
 - 工具任务继续运行但没有读懂截图：检查工具结果中是否出现 `[Image Analysis Failed]`，这是防止会话卡死的降级行为。
-- `upstream_unreachable`：确认 CC Switch 本地代理正在配置的上游端口运行。
+- `Cannot connect to CC Switch upstream`：确认 CC Switch 本地代理正在配置的上游端口运行。
 - 切换供应商后失效：运行 `status.ps1`，检查 `profile_guard.running` 和 `last_error`。
-- `request_too_large_after_preprocessing`：历史文本或其他附件在移除图片后仍超过上游限制，应新建会话或移除大附件。
+- `Request remains larger than 32MB`：历史文本或其他附件在移除图片后仍超过上游限制，应新建会话或移除大附件。
 
 ## 隐私与安全
 

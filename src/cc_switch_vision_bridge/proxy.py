@@ -83,6 +83,31 @@ def _safe_headers(headers: aiohttp.typedefs.LooseHeaders) -> dict[str, str]:
     return {name: value for name, value in headers.items() if name.lower() not in HOP_BY_HOP}
 
 
+def _anthropic_error_response(
+    *, status: int, error_type: str, message: str, request_id: str
+) -> web.Response:
+    return web.json_response(
+        {
+            "type": "error",
+            "error": {"type": error_type, "message": message},
+            "request_id": request_id,
+        },
+        status=status,
+        headers={
+            "request-id": request_id,
+            "x-ccsvb-request-id": request_id,
+        },
+    )
+
+
+def _error_type_for_status(status: int) -> str:
+    if status in {400, 413, 415, 422}:
+        return "request_too_large" if status == 413 else "invalid_request_error"
+    if status == 504:
+        return "timeout_error"
+    return "api_error"
+
+
 async def health_handler(request: web.Request) -> web.Response:
     config = request.app[CONFIG_KEY]
     vision = request.app[VISION_KEY]
@@ -127,15 +152,11 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
                 result = await transform_images(parsed, request.app[VISION_KEY])
             except DirectImageError as exc:
                 logger.warning("request=%s direct_image_failed status=%d", request_id, exc.status)
-                return web.json_response(
-                    {
-                        "error": {
-                            "type": "vision_preprocessing_error",
-                            "message": str(exc),
-                            "request_id": request_id,
-                        }
-                    },
+                return _anthropic_error_response(
                     status=exc.status,
+                    error_type=_error_type_for_status(exc.status),
+                    message=f"Vision preprocessing failed: {exc}",
+                    request_id=request_id,
                 )
             outbound_body = json.dumps(
                 result.body, ensure_ascii=False, separators=(",", ":")
@@ -153,15 +174,11 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
             )
 
     if len(outbound_body) > config.proxy.max_upstream_mb * 1024 * 1024:
-        return web.json_response(
-            {
-                "error": {
-                    "type": "request_too_large_after_preprocessing",
-                    "message": f"Request remains larger than {config.proxy.max_upstream_mb}MB",
-                    "request_id": request_id,
-                }
-            },
+        return _anthropic_error_response(
             status=413,
+            error_type="request_too_large",
+            message=f"Request remains larger than {config.proxy.max_upstream_mb}MB",
+            request_id=request_id,
         )
 
     upstream_url = f"{config.proxy.upstream_base_url.rstrip('/')}{request.path_qs}"
@@ -188,39 +205,27 @@ async def proxy_handler(request: web.Request) -> web.StreamResponse:
             return response
     except aiohttp.ClientConnectorError:
         logger.error("request=%s upstream_unreachable", request_id)
-        return web.json_response(
-            {
-                "error": {
-                    "type": "upstream_unreachable",
-                    "message": "Cannot connect to CC Switch upstream",
-                    "request_id": request_id,
-                }
-            },
+        return _anthropic_error_response(
             status=502,
+            error_type="api_error",
+            message="Cannot connect to CC Switch upstream",
+            request_id=request_id,
         )
     except TimeoutError:
         logger.error("request=%s upstream_timeout", request_id)
-        return web.json_response(
-            {
-                "error": {
-                    "type": "upstream_timeout",
-                    "message": "CC Switch upstream timed out",
-                    "request_id": request_id,
-                }
-            },
+        return _anthropic_error_response(
             status=504,
+            error_type="timeout_error",
+            message="CC Switch upstream timed out",
+            request_id=request_id,
         )
     except aiohttp.ClientError as exc:
         logger.error("request=%s upstream_transport_error type=%s", request_id, type(exc).__name__)
-        return web.json_response(
-            {
-                "error": {
-                    "type": "upstream_transport_error",
-                    "message": "CC Switch upstream connection failed",
-                    "request_id": request_id,
-                }
-            },
+        return _anthropic_error_response(
             status=502,
+            error_type="api_error",
+            message="CC Switch upstream connection failed",
+            request_id=request_id,
         )
 
 

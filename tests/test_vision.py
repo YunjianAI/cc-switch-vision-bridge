@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import time
+
 import httpx
 import pytest
 
@@ -82,6 +85,38 @@ async def test_transient_mimo_error_is_retried_once(tmp_path, png_bytes):
         )
         assert await vision.describe(png_bytes, "question") == "ok"
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_retries_share_one_total_timeout_budget(tmp_path, png_bytes):
+    calls = 0
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.sleep(0.2)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        vision = VisionClient(
+            VisionConfig(
+                base_url="https://api.xiaomimimo.com/v1",
+                timeout_seconds=0.12,
+                retry_count=1,
+                retry_backoff_seconds=0,
+            ),
+            "test-secret",
+            VisionCache(tmp_path),
+            client,
+        )
+        started = time.monotonic()
+        assert await vision.describe(png_bytes, "question") == "ok"
+        elapsed = time.monotonic() - started
+
+    assert calls == 2
+    assert elapsed < 0.18
 
 
 @pytest.mark.asyncio
