@@ -125,6 +125,7 @@ async def health_handler(request: web.Request) -> web.Response:
             "vision": {
                 "configured": bool(config.vision.base_url and config.vision.model),
                 "model": config.vision.model,
+                "direct_image_thinking": config.vision.thinking,
                 "calls": vision.calls,
                 "failures": vision.failures,
             },

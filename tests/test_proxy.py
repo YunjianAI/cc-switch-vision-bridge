@@ -181,6 +181,7 @@ async def test_health_contains_no_secret(tmp_path, provider_server, upstream_ser
         data = json.loads(text)
         assert data["version"] == "0.1.2-dev"
         assert data["vision"]["model"] == "test-vision"
+        assert data["vision"]["direct_image_thinking"] == "disabled"
     finally:
         await client.close()
 
