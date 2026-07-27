@@ -15,7 +15,15 @@ def _run_uninstall(repo: Path, local_app_data: Path) -> subprocess.CompletedProc
     env = os.environ.copy()
     env["LOCALAPPDATA"] = str(local_app_data)
     return subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            command,
+        ],
         env=env,
         text=True,
         capture_output=True,

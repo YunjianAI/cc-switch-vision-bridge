@@ -9,7 +9,6 @@ import signal
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import aiohttp
 from aiohttp import web
@@ -20,6 +19,7 @@ from .config import AppConfig, load_config
 from .credentials import get_api_key
 from .profile_guard import ProfileGuard
 from .transform import DirectImageError, has_supported_images, transform_images
+from .upstream_guard import UpstreamGuard, upstream_reachable
 from .vision import VisionClient
 
 logger = logging.getLogger("ccsvb.proxy")
@@ -29,6 +29,8 @@ UPSTREAM_SESSION_KEY = web.AppKey("upstream_session", aiohttp.ClientSession)
 STOP_EVENT_KEY = web.AppKey("stop_event", asyncio.Event)
 PROFILE_GUARD_KEY = web.AppKey("profile_guard", ProfileGuard)
 GUARD_TASK_KEY = web.AppKey("guard_task", asyncio.Task)
+UPSTREAM_GUARD_KEY = web.AppKey("upstream_guard", UpstreamGuard)
+UPSTREAM_GUARD_TASK_KEY = web.AppKey("upstream_guard_task", asyncio.Task)
 HOP_BY_HOP = {
     "host",
     "content-length",
@@ -65,20 +67,6 @@ def setup_logging(config: AppConfig, verbose: bool = False) -> None:
         root.addHandler(console)
 
 
-async def _upstream_reachable(base_url: str) -> bool:
-    parsed = urlparse(base_url)
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        _, writer = await asyncio.wait_for(
-            asyncio.open_connection(parsed.hostname, port), timeout=1.5
-        )
-        writer.close()
-        await writer.wait_closed()
-        return True
-    except (OSError, TimeoutError):
-        return False
-
-
 def _safe_headers(headers: aiohttp.typedefs.LooseHeaders) -> dict[str, str]:
     return {name: value for name, value in headers.items() if name.lower() not in HOP_BY_HOP}
 
@@ -113,6 +101,7 @@ async def health_handler(request: web.Request) -> web.Response:
     vision = request.app[VISION_KEY]
     cache = vision.cache.stats
     guard = request.app.get(PROFILE_GUARD_KEY)
+    upstream_guard = request.app.get(UPSTREAM_GUARD_KEY)
     return web.json_response(
         {
             "status": "ok",
@@ -120,7 +109,12 @@ async def health_handler(request: web.Request) -> web.Response:
             "listen": f"{config.proxy.listen_host}:{config.proxy.listen_port}",
             "upstream": {
                 "url": config.proxy.upstream_base_url,
-                "reachable": await _upstream_reachable(config.proxy.upstream_base_url),
+                "reachable": await upstream_reachable(config.proxy.upstream_base_url),
+                "recovery": (
+                    upstream_guard.status()
+                    if upstream_guard
+                    else {"enabled": False, "running": False}
+                ),
             },
             "vision": {
                 "configured": bool(config.vision.base_url and config.vision.model),
@@ -252,17 +246,28 @@ async def create_app(config: AppConfig, *, api_key: str | None = None) -> web.Ap
     if config.profile.guard_enabled and config.profile.path:
         guard = ProfileGuard(config)
         app[PROFILE_GUARD_KEY] = guard
+    upstream_guard = None
+    if config.upstream_recovery.enabled:
+        upstream_guard = UpstreamGuard(config)
+        app[UPSTREAM_GUARD_KEY] = upstream_guard
 
     async def start_background(_: web.Application) -> None:
         config.pid_path.write_text(str(os.getpid()), encoding="ascii")
         if guard:
             app[GUARD_TASK_KEY] = asyncio.create_task(guard.run(app[STOP_EVENT_KEY]))
+        if upstream_guard:
+            app[UPSTREAM_GUARD_TASK_KEY] = asyncio.create_task(
+                upstream_guard.run(app[STOP_EVENT_KEY])
+            )
 
     async def cleanup(_: web.Application) -> None:
         app[STOP_EVENT_KEY].set()
         task = app.get(GUARD_TASK_KEY)
         if task:
             await task
+        upstream_task = app.get(UPSTREAM_GUARD_TASK_KEY)
+        if upstream_task:
+            await upstream_task
         await upstream_session.close()
         await vision.__aexit__(None, None, None)
         try:

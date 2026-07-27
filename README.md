@@ -109,6 +109,13 @@ http://127.0.0.1:15722/health
 - `max_concurrency = 3`：并行视觉请求数量。
 - `ttl_hours = 24`：缓存时间，设为 `0` 可关闭缓存。
 - `guard_enabled = true`：CC Switch 重写 profile 后自动恢复 15722。
+- `[upstream_recovery]`：连续检测到 15721 不可达时，恢复 CC Switch 数据库中
+  Claude 代理开关并重启 CC Switch。安装器只在检测到标准数据库和程序路径时启用。
+- `failure_threshold = 2` 与 `cooldown_seconds = 60`：避免瞬时抖动触发修复和重启风暴。
+- 安装器同时注册每两分钟运行一次的 `CC Switch Vision Bridge Watchdog`。如果 15722
+  不再监听，watchdog 会重新启动 bridge 任务；bridge 启动后再负责恢复 15721。
+- CC Switch 不在默认位置时，可向 `install.ps1` 传入 `-CcSwitchDbPath` 和
+  `-CcSwitchExePath`。未检测到两个文件时，自愈保持关闭，不会猜测或修改其他数据库。
 
 无人值守安装可在进程环境中临时设置 `CCSVB_VISION_API_KEY`。不要把它写入仓库或脚本。
 
@@ -126,6 +133,9 @@ http://127.0.0.1:15722/health
 - `Vision preprocessing failed: Vision provider timed out`：代理已收到图片，但视觉供应商没有在总时间预算内响应。先直接测试视觉 API，再考虑增大 `timeout_seconds`。
 - 工具任务继续运行但没有读懂截图：检查工具结果中是否出现 `[Image Analysis Failed]`，这是防止会话卡死的降级行为。
 - `Cannot connect to CC Switch upstream`：确认 CC Switch 本地代理正在配置的上游端口运行。
+- 如果 `/health` 中 `upstream.recovery.last_error` 非空，先检查 CC Switch 安装路径和
+  `%USERPROFILE%\.cc-switch\cc-switch.db`。自愈只修改 `proxy_config` 中 `app_type=claude`
+  的 `proxy_enabled`、`enabled` 两列。
 - 切换供应商后失效：运行 `status.ps1`，检查 `profile_guard.running` 和 `last_error`。
 - `Request remains larger than 32MB`：历史文本或其他附件在移除图片后仍超过上游限制，应新建会话或移除大附件。
 

@@ -6,6 +6,7 @@ $Python = Join-Path $AppDir ".venv\Scripts\python.exe"
 $Config = Join-Path $AppDir "config.toml"
 $State = Join-Path $AppDir "state.json"
 $TaskName = "CC Switch Vision Bridge"
+$WatchdogTaskName = "CC Switch Vision Bridge Watchdog"
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($task) {
@@ -13,6 +14,13 @@ if ($task) {
     Write-Host "Task: $($task.State), last result: $($info.LastTaskResult)"
 } else {
     Write-Host "Task: not installed"
+}
+$watchdog = Get-ScheduledTask -TaskName $WatchdogTaskName -ErrorAction SilentlyContinue
+if ($watchdog) {
+    $watchdogInfo = Get-ScheduledTaskInfo -TaskName $WatchdogTaskName
+    Write-Host "Watchdog: $($watchdog.State), last result: $($watchdogInfo.LastTaskResult)"
+} else {
+    Write-Host "Watchdog: not installed"
 }
 if (Test-Path $State) {
     $stateJson = Get-Content -LiteralPath $State -Raw | ConvertFrom-Json
