@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.2-dev
+
+- Disable MiMo v2.5 deep thinking for image preprocessing by default to reduce avoidable latency, while keeping the setting configurable and isolated from generic OpenAI-compatible providers.
+- Include the MiMo thinking mode in the cache profile so switching modes cannot reuse an incompatible cached description.
+- Let a slow vision request use the full remaining timeout budget; retry only failures that return early, instead of cancelling a potentially successful request halfway through.
+- Expose the direct-image thinking mode in `/health` and document that `mcp-vision` keeps MiMo's default thinking behavior for active path and URL analysis.
+- Bind each image to the question from its own conversation turn.
+- Reanalyze the most recent image group only when a text-only follow-up asks a new question.
+- Reuse historical image descriptions when a new turn contains a different image, avoiding repeated MiMo calls as image history grows.
+- Treat `timeout_seconds` as one total budget shared by all vision retry attempts, preventing a nominal 60-second timeout from blocking for roughly 120 seconds.
+- Return locally generated failures in the Anthropic API error shape so Claude clients can surface preprocessing errors and request IDs.
+- Add a system-level handoff instruction for completed Vision Bridge analyses so text models do not redundantly invoke MCP vision or search temporary folders.
+- Return exhausted direct-image preprocessing failures as non-retryable 422 errors after the Bridge's own retry, preventing Claude Code from repeating the same failed vision request ten times.
+
 ## 0.1.1-beta
 
 - Use MiMo's official `api-key` authentication and `max_completion_tokens` request field.

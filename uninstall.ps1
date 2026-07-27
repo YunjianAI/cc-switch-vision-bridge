@@ -3,6 +3,7 @@ param([switch] $KeepCredentials)
 
 $ErrorActionPreference = "Stop"
 $TaskName = "CC Switch Vision Bridge"
+$WatchdogTaskName = "CC Switch Vision Bridge Watchdog"
 $AppDir = Join-Path $env:LOCALAPPDATA "CCSwitchVisionBridge"
 $StatePath = Join-Path $AppDir "state.json"
 $PidPath = Join-Path $AppDir "bridge.pid"
@@ -33,6 +34,9 @@ if (Test-Path $PidPath) {
 
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+}
+if (Get-ScheduledTask -TaskName $WatchdogTaskName -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName $WatchdogTaskName -Confirm:$false
 }
 
 if (Test-Path $StatePath) {

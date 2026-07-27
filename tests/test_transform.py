@@ -5,6 +5,7 @@ import base64
 import pytest
 
 from cc_switch_vision_bridge.transform import (
+    BRIDGE_SYSTEM_INSTRUCTION,
     DirectImageError,
     has_supported_images,
     transform_images,
@@ -50,7 +51,8 @@ async def test_top_level_image_is_replaced(png_bytes):
     assert result.direct_image_count == 1
     assert result.tool_image_count == 0
     assert result.body["messages"][0]["content"][0]["type"] == "text"
-    assert "Image Description" in result.body["messages"][0]["content"][0]["text"]
+    assert "Vision Bridge Image Analysis" in result.body["messages"][0]["content"][0]["text"]
+    assert result.body["system"] == BRIDGE_SYSTEM_INSTRUCTION
     assert body["messages"][0]["content"][0]["type"] == "image"
 
 
@@ -79,6 +81,33 @@ async def test_nested_tool_result_image_is_replaced(png_bytes):
     assert [item["type"] for item in content] == ["text", "text"]
     assert result.tool_image_count == 1
     assert result.direct_image_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("system", "expected_type"),
+    [
+        ("existing system prompt", str),
+        ([{"type": "text", "text": "existing system prompt"}], list),
+    ],
+)
+async def test_bridge_instruction_preserves_existing_system_prompt(
+    png_bytes, system, expected_type
+):
+    body = {
+        "system": system,
+        "messages": [{"role": "user", "content": [image_block(png_bytes)]}],
+    }
+    result = await transform_images(body, FakeVision())
+    transformed_system = result.body["system"]
+    assert isinstance(transformed_system, expected_type)
+    if isinstance(transformed_system, str):
+        assert transformed_system.startswith("existing system prompt")
+        assert BRIDGE_SYSTEM_INSTRUCTION in transformed_system
+    else:
+        assert transformed_system[0]["text"] == "existing system prompt"
+        assert transformed_system[-1]["text"] == BRIDGE_SYSTEM_INSTRUCTION
+    assert body["system"] == system
 
 
 @pytest.mark.asyncio
@@ -168,6 +197,78 @@ async def test_multiple_images_preserve_order_and_prompt(png_bytes):
         "text",
     ]
     assert vision.prompts == ["compare with", "compare with"]
+
+
+@pytest.mark.asyncio
+async def test_text_followup_reanalyzes_most_recent_image_with_new_question(png_bytes):
+    vision = FakeVision()
+    body = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    image_block(png_bytes),
+                    {"type": "text", "text": "describe the whole image"},
+                ],
+            },
+            {"role": "assistant", "content": "initial answer"},
+            {"role": "user", "content": "how many steps are visible?"},
+        ]
+    }
+    await transform_images(body, vision)
+    assert vision.prompts == ["how many steps are visible?"]
+
+
+@pytest.mark.asyncio
+async def test_new_image_question_does_not_reprompt_historical_image(png_bytes):
+    vision = FakeVision()
+    body = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    image_block(png_bytes),
+                    {"type": "text", "text": "question for the old image"},
+                ],
+            },
+            {"role": "assistant", "content": "old answer"},
+            {
+                "role": "user",
+                "content": [
+                    image_block(png_bytes + b"new"),
+                    {"type": "text", "text": "question for the new image"},
+                ],
+            },
+        ]
+    }
+    await transform_images(body, vision)
+    assert vision.prompts == [
+        "question for the old image",
+        "question for the new image",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tool_screenshot_uses_preceding_user_request(png_bytes):
+    vision = FakeVision()
+    body = {
+        "messages": [
+            {"role": "user", "content": "inspect the page screenshot"},
+            {"role": "assistant", "content": "using a browser tool"},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "browser_1",
+                        "content": [image_block(png_bytes)],
+                    }
+                ],
+            },
+        ]
+    }
+    await transform_images(body, vision)
+    assert vision.prompts == ["inspect the page screenshot"]
 
 
 @pytest.mark.asyncio

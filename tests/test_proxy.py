@@ -179,7 +179,52 @@ async def test_health_contains_no_secret(tmp_path, provider_server, upstream_ser
         assert response.status == 200
         assert "test-key" not in text
         data = json.loads(text)
-        assert data["version"] == "0.1.1-beta"
+        assert data["version"] == "0.1.2-dev"
         assert data["vision"]["model"] == "test-vision"
+        assert data["vision"]["direct_image_thinking"] == "disabled"
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_image_failure_uses_anthropic_error_shape(
+    tmp_path, upstream_server, png_bytes
+):
+    async def fail(_: web.Request) -> web.Response:
+        return web.json_response({"error": {"message": "provider secret"}}, status=500)
+
+    provider_app = web.Application()
+    provider_app.router.add_post("/v1/chat/completions", fail)
+    provider = TestServer(provider_app)
+    await provider.start_server()
+    cfg = AppConfig(
+        proxy=ProxyConfig(
+            upstream_base_url=str(upstream_server.make_url("/")).rstrip("/"),
+        ),
+        vision=VisionConfig(
+            base_url=str(provider.make_url("/v1")).rstrip("/"),
+            model="test-vision",
+            retry_count=0,
+        ),
+        profile=ProfileConfig(guard_enabled=False),
+        cache=CacheConfig(directory=str(tmp_path / "cache")),
+        config_path=tmp_path / "config.toml",
+    )
+    app = await create_app(cfg, api_key="test-key")
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        response = await client.post(
+            "/claude-desktop/v1/messages",
+            json={"messages": [{"role": "user", "content": [image_block(png_bytes)]}]},
+        )
+        data = await response.json()
+        assert response.status == 422
+        assert data["type"] == "error"
+        assert data["error"]["type"] == "invalid_request_error"
+        assert "provider secret" not in data["error"]["message"]
+        assert data["request_id"] == response.headers["request-id"]
+        assert data["request_id"] == response.headers["x-ccsvb-request-id"]
+    finally:
+        await client.close()
+        await provider.close()

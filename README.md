@@ -104,25 +104,40 @@ http://127.0.0.1:15722/health
 
 - `max_request_mb = 64`：代理允许读取的请求体上限。
 - `max_upstream_mb = 32`：图像替换后允许发送到 CC Switch 的上限。
+- `timeout_seconds = 60`：单张图片识别及其全部重试共享的总时间预算。单次慢请求可使用完整剩余预算，不会为预留重试次数而被提前取消。
+- `thinking = "disabled"`：只控制 Bridge 的直接发图和工具截图预处理。这里的职责是提取可见文字、数值、状态和布局，推理仍由后续文本模型完成，因此默认关闭 MiMo 深度思考。该字段只会发送给 MiMo 官方域名，其他 OpenAI 兼容接口不会收到 MiMo 专用参数。
 - `max_concurrency = 3`：并行视觉请求数量。
 - `ttl_hours = 24`：缓存时间，设为 `0` 可关闭缓存。
 - `guard_enabled = true`：CC Switch 重写 profile 后自动恢复 15722。
+- `[upstream_recovery]`：连续检测到 15721 不可达时，恢复 CC Switch 数据库中
+  Claude 代理开关并重启 CC Switch。安装器只在检测到标准数据库和程序路径时启用。
+- `failure_threshold = 2` 与 `cooldown_seconds = 60`：避免瞬时抖动触发修复和重启风暴。
+- 安装器同时注册每两分钟运行一次的 `CC Switch Vision Bridge Watchdog`。如果 15722
+  不再监听，watchdog 会重新启动 bridge 任务；bridge 启动后再负责恢复 15721。
+- CC Switch 不在默认位置时，可向 `install.ps1` 传入 `-CcSwitchDbPath` 和
+  `-CcSwitchExePath`。未检测到两个文件时，自愈保持关闭，不会猜测或修改其他数据库。
 
 无人值守安装可在进程环境中临时设置 `CCSVB_VISION_API_KEY`。不要把它写入仓库或脚本。
 
+`mcp-vision 1.0.1` 当前不会传递 MiMo 的 `thinking` 参数，因此路径和 URL 的主动视觉分析仍采用 MiMo v2.5 的官方默认值，也就是开启深度思考。这样两条链路按职责分工：聊天框图片优先稳定交接，复杂主动分析保留推理能力。Bridge 不根据问题文字自动猜测复杂度，也不会在超时后用另一种思考模式重复计费。
+
 ## 失败处理
 
-- 用户直接发送的图片识别失败时，请求返回 422 或 502，原图不会发送给文本模型。
+- 用户直接发送的图片识别失败时，请求返回 422，原图不会发送给文本模型。
+- Bridge 自己完成重试后，直接发图仍失败会返回 422，避免 Claude Code 再自动重试同一张图十次。
 - 工具结果里的截图识别失败时，图片会被替换成 `[Image Analysis Failed]`，主对话继续运行。
 - 视觉模型的空结果、超时、HTTP 错误和安全拒绝不会进入缓存。
 
 ## 排错
 
-- `vision_preprocessing_error: Vision provider timed out`：代理已收到图片，但视觉供应商没有在配置时间内响应。先直接测试视觉 API，再考虑增大 `timeout_seconds`。
+- `Vision preprocessing failed: Vision provider timed out`：代理已收到图片，但视觉供应商没有在总时间预算内响应。先直接测试视觉 API，再考虑增大 `timeout_seconds`。
 - 工具任务继续运行但没有读懂截图：检查工具结果中是否出现 `[Image Analysis Failed]`，这是防止会话卡死的降级行为。
-- `upstream_unreachable`：确认 CC Switch 本地代理正在配置的上游端口运行。
+- `Cannot connect to CC Switch upstream`：确认 CC Switch 本地代理正在配置的上游端口运行。
+- 如果 `/health` 中 `upstream.recovery.last_error` 非空，先检查 CC Switch 安装路径和
+  `%USERPROFILE%\.cc-switch\cc-switch.db`。自愈只修改 `proxy_config` 中 `app_type=claude`
+  的 `proxy_enabled`、`enabled` 两列。
 - 切换供应商后失效：运行 `status.ps1`，检查 `profile_guard.running` 和 `last_error`。
-- `request_too_large_after_preprocessing`：历史文本或其他附件在移除图片后仍超过上游限制，应新建会话或移除大附件。
+- `Request remains larger than 32MB`：历史文本或其他附件在移除图片后仍超过上游限制，应新建会话或移除大附件。
 
 ## 隐私与安全
 

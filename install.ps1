@@ -3,6 +3,8 @@ param(
     [string] $VisionBaseUrl = "https://api.xiaomimimo.com/v1",
     [string] $VisionModel = "mimo-v2.5",
     [string] $UpstreamBaseUrl = "http://127.0.0.1:15721",
+    [string] $CcSwitchDbPath,
+    [string] $CcSwitchExePath,
     [string] $ProfilePath,
     [string] $McpConfigPath,
     [string] $McpServerName = "vision",
@@ -12,6 +14,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $TaskName = "CC Switch Vision Bridge"
+$WatchdogTaskName = "CC Switch Vision Bridge Watchdog"
 $AppDir = Join-Path $env:LOCALAPPDATA "CCSwitchVisionBridge"
 $VenvDir = Join-Path $AppDir ".venv"
 $Python = Join-Path $VenvDir "Scripts\python.exe"
@@ -21,6 +24,13 @@ $StatePath = Join-Path $AppDir "state.json"
 $PidPath = Join-Path $AppDir "bridge.pid"
 $BackupDir = Join-Path $AppDir "backups"
 $RepoRoot = $PSScriptRoot
+$WatchdogPath = Join-Path $AppDir "watchdog.ps1"
+if (-not $CcSwitchDbPath) {
+    $CcSwitchDbPath = Join-Path $env:USERPROFILE ".cc-switch\cc-switch.db"
+}
+if (-not $CcSwitchExePath) {
+    $CcSwitchExePath = "C:\software\CC Switch\cc-switch.exe"
+}
 
 function Write-Utf8NoBom([string] $Path, [string] $Text) {
     $encoding = New-Object System.Text.UTF8Encoding($false)
@@ -62,7 +72,7 @@ function Select-ClaudeProfile {
     return $candidates[$choice - 1].Path
 }
 
-Write-Host "Installing CC Switch Vision Bridge v0.1.1-beta"
+Write-Host "Installing CC Switch Vision Bridge v0.1.2-dev"
 New-Item -ItemType Directory -Force -Path $AppDir, $BackupDir | Out-Null
 
 if (-not $ProfilePath) { $ProfilePath = Select-ClaudeProfile }
@@ -133,6 +143,7 @@ timeout_seconds = 60
 max_concurrency = 3
 max_image_mb = 20
 max_completion_tokens = 1024
+thinking = "disabled"
 retry_count = 1
 retry_backoff_seconds = 0.5
 
@@ -146,8 +157,26 @@ poll_seconds = 2
 directory = ""
 ttl_hours = 24
 enabled = true
+
+[upstream_recovery]
+enabled = $(
+    if ((Test-Path -LiteralPath $CcSwitchDbPath) -and
+        (Test-Path -LiteralPath $CcSwitchExePath)) {
+        "true"
+    } else {
+        "false"
+    }
+)
+check_seconds = 10
+failure_threshold = 2
+cooldown_seconds = 60
+startup_timeout_seconds = 15
+cc_switch_db = "$($CcSwitchDbPath.Replace('\', '\\'))"
+cc_switch_exe = "$($CcSwitchExePath.Replace('\', '\\'))"
+app_type = "claude"
 "@
 Write-Utf8NoBom $ConfigPath $config
+Copy-Item -LiteralPath (Join-Path $RepoRoot "watchdog.ps1") -Destination $WatchdogPath -Force
 
 if ($env:CCSVB_VISION_API_KEY) {
     $plainKey = $env:CCSVB_VISION_API_KEY
@@ -230,7 +259,7 @@ $stateMcpInstalledEntry = if ($ConfigureMcp) { $mcpEntry } elseif ($previousStat
 } else { $null }
 
 $state = [ordered]@{
-    version = "0.1.1-beta"
+    version = "0.1.2-dev"
     installed_at = (Get-Date).ToString("o")
     repo_root = $RepoRoot
     profile_path = $ProfilePath
@@ -260,6 +289,19 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Se
     -Description "Local vision preprocessing bridge for Claude Desktop and CC Switch" `
     -Force | Out-Null
 
+$watchdogArguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass " +
+    "-WindowStyle Hidden -File `"$WatchdogPath`" -BridgeTaskName `"$TaskName`""
+$watchdogAction = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument $watchdogArguments
+$watchdogTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+    -RepetitionInterval (New-TimeSpan -Minutes 2)
+$watchdogSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 1) `
+    -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName $WatchdogTaskName -Action $watchdogAction `
+    -Trigger $watchdogTrigger -Settings $watchdogSettings `
+    -Description "Restarts CC Switch Vision Bridge if port 15722 stops listening" `
+    -Force | Out-Null
+
 $servers = [ordered]@{}
 $servers[$McpServerName] = $mcpEntry
 $snippet = [ordered]@{ mcpServers = $servers }
@@ -277,5 +319,8 @@ if ($ConfigureMcp) {
     Write-JsonAtomic $McpConfigPath $mcp
 }
 
-if (-not $NoStart) { Start-ScheduledTask -TaskName $TaskName }
+if (-not $NoStart) {
+    Start-ScheduledTask -TaskName $TaskName
+    Start-ScheduledTask -TaskName $WatchdogTaskName
+}
 Write-Host "Installed. Restart Claude Desktop, then run .\status.ps1."

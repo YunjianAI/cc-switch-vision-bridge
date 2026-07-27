@@ -33,6 +33,7 @@ class VisionConfig:
     max_concurrency: int = 3
     max_image_mb: int = 20
     max_completion_tokens: int = 1024
+    thinking: str = "disabled"
     retry_count: int = 1
     retry_backoff_seconds: float = 0.5
 
@@ -53,11 +54,24 @@ class CacheConfig:
 
 
 @dataclass(slots=True)
+class UpstreamRecoveryConfig:
+    enabled: bool = False
+    check_seconds: float = 10.0
+    failure_threshold: int = 2
+    cooldown_seconds: float = 60.0
+    startup_timeout_seconds: float = 15.0
+    cc_switch_db: str = ""
+    cc_switch_exe: str = ""
+    app_type: str = "claude"
+
+
+@dataclass(slots=True)
 class AppConfig:
     proxy: ProxyConfig = field(default_factory=ProxyConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     profile: ProfileConfig = field(default_factory=ProfileConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
+    upstream_recovery: UpstreamRecoveryConfig = field(default_factory=UpstreamRecoveryConfig)
     config_path: Path = field(default_factory=lambda: default_app_dir() / "config.toml")
 
     @property
@@ -100,12 +114,34 @@ class AppConfig:
             raise ValueError("vision.max_concurrency must be positive")
         if self.vision.max_completion_tokens < 1:
             raise ValueError("vision.max_completion_tokens must be positive")
+        if self.vision.thinking not in {"enabled", "disabled"}:
+            raise ValueError("vision.thinking must be 'enabled' or 'disabled'")
         if self.vision.retry_count < 0:
             raise ValueError("vision.retry_count cannot be negative")
         if self.vision.retry_backoff_seconds < 0:
             raise ValueError("vision.retry_backoff_seconds cannot be negative")
         if self.cache.ttl_hours < 0:
             raise ValueError("cache.ttl_hours cannot be negative")
+        if self.upstream_recovery.check_seconds <= 0:
+            raise ValueError("upstream_recovery.check_seconds must be positive")
+        if self.upstream_recovery.failure_threshold < 1:
+            raise ValueError("upstream_recovery.failure_threshold must be positive")
+        if self.upstream_recovery.cooldown_seconds < 0:
+            raise ValueError("upstream_recovery.cooldown_seconds cannot be negative")
+        if self.upstream_recovery.startup_timeout_seconds <= 0:
+            raise ValueError("upstream_recovery.startup_timeout_seconds must be positive")
+        if self.upstream_recovery.enabled:
+            parsed_upstream = urlparse(self.proxy.upstream_base_url)
+            if parsed_upstream.hostname not in {"127.0.0.1", "localhost", "::1"}:
+                raise ValueError(
+                    "upstream_recovery requires a loopback proxy.upstream_base_url"
+                )
+            if not self.upstream_recovery.cc_switch_db:
+                raise ValueError("upstream_recovery.cc_switch_db is required when enabled")
+            if not self.upstream_recovery.cc_switch_exe:
+                raise ValueError("upstream_recovery.cc_switch_exe is required when enabled")
+            if not self.upstream_recovery.app_type:
+                raise ValueError("upstream_recovery.app_type is required when enabled")
 
 
 def _section(data: dict, name: str) -> dict:
@@ -125,6 +161,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         vision=VisionConfig(**_section(data, "vision")),
         profile=ProfileConfig(**_section(data, "profile")),
         cache=CacheConfig(**_section(data, "cache")),
+        upstream_recovery=UpstreamRecoveryConfig(**_section(data, "upstream_recovery")),
         config_path=config_path.resolve(),
     )
     cfg.validate()
