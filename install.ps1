@@ -24,7 +24,7 @@ $StatePath = Join-Path $AppDir "state.json"
 $PidPath = Join-Path $AppDir "bridge.pid"
 $BackupDir = Join-Path $AppDir "backups"
 $RepoRoot = $PSScriptRoot
-$WatchdogPath = Join-Path $AppDir "watchdog.ps1"
+$WatchdogPath = Join-Path $AppDir "watchdog.py"
 if (-not $CcSwitchDbPath) {
     $CcSwitchDbPath = Join-Path $env:USERPROFILE ".cc-switch\cc-switch.db"
 }
@@ -176,7 +176,7 @@ cc_switch_exe = "$($CcSwitchExePath.Replace('\', '\\'))"
 app_type = "claude"
 "@
 Write-Utf8NoBom $ConfigPath $config
-Copy-Item -LiteralPath (Join-Path $RepoRoot "watchdog.ps1") -Destination $WatchdogPath -Force
+Copy-Item -LiteralPath (Join-Path $RepoRoot "watchdog.py") -Destination $WatchdogPath -Force
 
 if ($env:CCSVB_VISION_API_KEY) {
     $plainKey = $env:CCSVB_VISION_API_KEY
@@ -289,9 +289,8 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Se
     -Description "Local vision preprocessing bridge for Claude Desktop and CC Switch" `
     -Force | Out-Null
 
-$watchdogArguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass " +
-    "-WindowStyle Hidden -File `"$WatchdogPath`" -BridgeTaskName `"$TaskName`""
-$watchdogAction = New-ScheduledTaskAction -Execute "powershell.exe" `
+$watchdogArguments = "`"$WatchdogPath`""
+$watchdogAction = New-ScheduledTaskAction -Execute $PythonW `
     -Argument $watchdogArguments
 $watchdogTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
     -RepetitionInterval (New-TimeSpan -Minutes 2)
