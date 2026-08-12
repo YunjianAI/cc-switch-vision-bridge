@@ -13,6 +13,8 @@
 - Return locally generated failures in the Anthropic API error shape so Claude clients can surface preprocessing errors and request IDs.
 - Add a system-level handoff instruction for completed Vision Bridge analyses so text models do not redundantly invoke MCP vision or search temporary folders.
 - Return exhausted direct-image preprocessing failures as non-retryable 422 errors after the Bridge's own retry, preventing Claude Code from repeating the same failed vision request ten times.
+- Recover the CC Switch local gateway when the configured upstream becomes unavailable, with guarded database detection, cooldowns and bounded restart checks.
+- Add a scheduled watchdog that restarts the Bridge when port 15722 stops listening, and run it through `pythonw` to avoid recurring console popups.
 
 ## 0.1.1-beta
 
