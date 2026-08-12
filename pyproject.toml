@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cc-switch-vision-bridge"
-version = "0.1.2.dev0"
+version = "0.1.2"
 description = "A local vision preprocessing bridge for Claude Desktop and CC Switch."
 readme = "README.md"
 requires-python = ">=3.11"

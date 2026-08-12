@@ -4,7 +4,7 @@
 
 当用户直接粘贴图片，或 Playwright、Claude Preview 等工具返回截图时，本地代理会先调用 MiMo v2.5 生成描述，再把纯文本请求交给 CC Switch。AI 主动读取本地图片路径或 URL 时，继续使用 `mcp-vision`。
 
-> Experimental / Beta。该项目不是 CC Switch、Anthropic、小米 MiMo 或 mcp-vision 的官方组件。
+> Experimental。该项目不是 CC Switch、Anthropic、小米 MiMo 或 mcp-vision 的官方组件。
 
 ## 工作方式
 

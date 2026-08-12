@@ -179,7 +179,7 @@ async def test_health_contains_no_secret(tmp_path, provider_server, upstream_ser
         assert response.status == 200
         assert "test-key" not in text
         data = json.loads(text)
-        assert data["version"] == "0.1.2-dev"
+        assert data["version"] == "0.1.2"
         assert data["vision"]["model"] == "test-vision"
         assert data["vision"]["direct_image_thinking"] == "disabled"
     finally:

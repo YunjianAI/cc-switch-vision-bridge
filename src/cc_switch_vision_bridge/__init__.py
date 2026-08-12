@@ -1,3 +1,3 @@
 """CC Switch Vision Bridge."""
 
-__version__ = "0.1.2-dev"
+__version__ = "0.1.2"

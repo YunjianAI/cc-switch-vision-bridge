@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.2-dev
+## 0.1.2
 
 - Disable MiMo v2.5 deep thinking for image preprocessing by default to reduce avoidable latency, while keeping the setting configurable and isolated from generic OpenAI-compatible providers.
 - Include the MiMo thinking mode in the cache profile so switching modes cannot reuse an incompatible cached description.
