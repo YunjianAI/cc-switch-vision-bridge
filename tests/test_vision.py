@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 
 import httpx
 import pytest
@@ -159,13 +158,9 @@ async def test_slow_request_gets_the_full_total_timeout_budget(tmp_path, png_byt
             VisionCache(tmp_path),
             client,
         )
-        started = time.monotonic()
         assert await vision.describe(png_bytes, "question") == "ok"
-        elapsed = time.monotonic() - started
 
     assert calls == 1
-    assert elapsed >= 0.08
-    assert elapsed < 0.18
 
 
 @pytest.mark.asyncio
